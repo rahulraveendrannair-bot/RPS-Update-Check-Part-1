@@ -3,6 +3,8 @@ import pandas as pd
 from openpyxl import load_workbook
 from io import BytesIO
 from datetime import datetime
+import requests
+from bs4 import BeautifulSoup
 
 st.set_page_config(
     page_title="RPS-BOT",
@@ -14,66 +16,73 @@ st.title("🤖 RPS-BOT Dashboard")
 st.caption(f"Last refreshed: {datetime.now().strftime('%d %B %Y, %H:%M:%S')}")
 st.markdown("---")
 
-# ── Scraper Functions ───────────────────────────────────────────────────────
+# ── Scraper Functions (No Selenium — requests + BeautifulSoup only) ─────────
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
+
+def scrape_GB_FCD_UK_SANCTIONS_LIST():
+    url = "https://www.gov.uk/government/publications/the-uk-sanctions-list"
+    r = requests.get(url, headers=HEADERS, timeout=15)
+    soup = BeautifulSoup(r.text, "html.parser")
+    result = soup.find_all("dd", class_="gem-c-metadata__definition")[2].text.strip()
+    return result.split("—")[0].strip()
+
+def scrape_HM_Treasury_Consolidated_List():
+    url = "https://www.gov.uk/government/publications/financial-sanctions-consolidated-list-of-targets"
+    r = requests.get(url, headers=HEADERS, timeout=15)
+    soup = BeautifulSoup(r.text, "html.parser")
+    result = soup.find_all("dd", class_="gem-c-metadata__definition")[2].text.strip()
+    return result.split("—")[0].strip()
+
+def scrape_US_DOJ_HUMANTRAFFICKING_CASES():
+    url = "https://www.justice.gov/humantrafficking/press-room"
+    r = requests.get(url, headers=HEADERS, timeout=15)
+    soup = BeautifulSoup(r.text, "html.parser")
+    return soup.find("time").text.strip()
+
+def scrape_SG_MAS_IAL():
+    url = "https://www.mas.gov.sg/investor-alert-list?page=1&rows=All"
+    r = requests.get(url, headers=HEADERS, timeout=15)
+    soup = BeautifulSoup(r.text, "html.parser")
+    return soup.find("div", class_="mas-search-card__meta").text.split(":")[1].strip()
+
+def scrape_HK_SFC_AL():
+    url = "https://www.sfc.hk/en/alert-list"
+    r = requests.get(url, headers=HEADERS, timeout=15)
+    soup = BeautifulSoup(r.text, "html.parser")
+    table = soup.find("div", class_="table-container main-style alert-list-table")
+    table1 = table.find_all("tr")[1]
+    return table1.find_all("td")[2].text.strip()
+
+SCRAPER_MAP = {
+    "GB_FCD_UK_SANCTIONS_LIST":      scrape_GB_FCD_UK_SANCTIONS_LIST,
+    "HM_Treasury_Consolidated_List": scrape_HM_Treasury_Consolidated_List,
+    "US_DOJ_HUMANTRAFFICKING_CASES": scrape_US_DOJ_HUMANTRAFFICKING_CASES,
+    "SG_MAS_IAL":                    scrape_SG_MAS_IAL,
+    "HK_SFC_AL":                     scrape_HK_SFC_AL,
+}
+
 def run_scraper(func_name):
     try:
-        from bs4 import BeautifulSoup
-        from selenium import webdriver
-        from selenium.webdriver.chrome.options import Options
-        import time
-
-        options = Options()
-        options.add_argument("--headless")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--log-level=3")
-        options.add_experimental_option("excludeSwitches", ["enable-logging"])
-
-        driver = webdriver.Chrome(options=options)
-        result = None
-
-        if func_name == "GB_FCD_UK_SANCTIONS_LIST":
-            driver.get("https://www.gov.uk/government/publications/the-uk-sanctions-list")
-            time.sleep(3)
-            soup = BeautifulSoup(driver.page_source, "html.parser")
-            result = soup.find_all("dd", class_="gem-c-metadata__definition")[2].text.strip().split("—")[0].strip()
-
-        elif func_name == "HK_SFC_AL":
-            driver.get("https://www.sfc.hk/en/alert-list")
-            time.sleep(3)
-            soup = BeautifulSoup(driver.page_source, "html.parser")
-            table = soup.find("div", class_="table-container main-style alert-list-table")
-            table1 = table.find_all("tr")[1]
-            result = table1.find_all("td")[2].text
-
-        elif func_name == "SG_MAS_IAL":
-            driver.get("https://www.mas.gov.sg/investor-alert-list?page=1&rows=All")
-            time.sleep(3)
-            soup = BeautifulSoup(driver.page_source, "html.parser")
-            result = soup.find("div", class_="mas-search-card__meta").text.split(":")[1].strip()
-
-        elif func_name == "US_DOJ_HUMANTRAFFICKING_CASES":
-            driver.get("https://www.justice.gov/humantrafficking/press-room")
-            time.sleep(3)
-            soup = BeautifulSoup(driver.page_source, "html.parser")
-            result = soup.find("time").text
-
-        elif func_name == "HM_Treasury_Consolidated_List":
-            driver.get("https://www.gov.uk/government/publications/financial-sanctions-consolidated-list-of-targets")
-            time.sleep(3)
-            soup = BeautifulSoup(driver.page_source, "html.parser")
-            result = soup.find_all("dd", class_="gem-c-metadata__definition")[2].text.strip().split("—")[0].strip()
-
-        driver.quit()
+        func = SCRAPER_MAP.get(func_name)
+        if func is None:
+            return None, f"No scraper found for {func_name}"
+        result = func()
         return result, None
-
     except Exception as e:
-        try:
-            driver.quit()
-        except:
-            pass
         return None, str(e)
 
+# ── Status Styling ──────────────────────────────────────────────────────────
+def style_status(val):
+    if val == "Updated":
+        return "background-color: #d4edda; color: #155724; font-weight: bold;"
+    elif val == "Not Updated":
+        return "background-color: #d6d8db; color: #383d41; font-weight: bold;"
+    elif val == "Failed":
+        return "background-color: #f8d7da; color: #721c24; font-weight: bold;"
+    return ""
 
 # ── File Upload ─────────────────────────────────────────────────────────────
 st.subheader("📤 Step 1 — Upload RPS-BOT.xlsx")
@@ -104,16 +113,6 @@ if uploaded_file:
 
     # ── Show current data ───────────────────────────────────────────────────
     st.subheader("📊 Current Data")
-
-    def style_status(val):
-        if val == "Updated":
-            return "background-color: #d4edda; color: #155724; font-weight: bold;"
-        elif val == "Not Updated":
-            return "background-color: #d6d8db; color: #383d41; font-weight: bold;"
-        elif val == "Failed":
-            return "background-color: #f8d7da; color: #721c24; font-weight: bold;"
-        return ""
-
     st.dataframe(
         df.style.applymap(style_status, subset=["Status"]),
         use_container_width=True,
@@ -130,7 +129,7 @@ if uploaded_file:
         # Shift Current Data → Previous Data
         df["Previous Data"] = df["Current Data"]
 
-        st.info("⏳ Scrapers running... this may take 1-2 minutes. Do not close this window.")
+        st.info("⏳ Scrapers running... please wait.")
 
         progress_bar = st.progress(0)
         status_log   = st.empty()
@@ -139,7 +138,7 @@ if uploaded_file:
         total = len(df)
         logs  = []
 
-        for i, row in df.iterrows():
+        for i in df.index:
             func_name = df.loc[i, "RPL-TYPE"]
             status_log.markdown(f"🔄 Running: **{func_name}**")
 
@@ -148,7 +147,7 @@ if uploaded_file:
             if error:
                 df.loc[i, "Status"]       = "Failed"
                 df.loc[i, "Current Data"] = None
-                logs.append(f"❌ **{func_name}** — Failed")
+                logs.append(f"❌ **{func_name}** — Failed: {error}")
             else:
                 df.loc[i, "Current Data"] = str(output_date)
                 if df.loc[i, "Previous Data"] == df.loc[i, "Current Data"]:
@@ -164,25 +163,16 @@ if uploaded_file:
         status_log.markdown("✅ **All scrapers completed!**")
 
         # ── Write results back to workbook ──────────────────────────────────
-        col_map = {
-            "RPL-TYPE":       1,
-            "RPL-TYPES":      2,
-            "Previous Data":  3,
-            "Current Data":   4,
-            "Status":         5,
-            "Tracking Number":6,
-            "Creation Date":  7,
-        }
         for idx, row in enumerate(df.itertuples(index=False), start=2):
-            ws.cell(row=idx, column=1).value = row[0]
-            ws.cell(row=idx, column=2).value = row[1]
+            ws.cell(row=idx, column=1).value = row[0]  # RPL-TYPE
+            ws.cell(row=idx, column=2).value = row[1]  # RPL-TYPES
             if hyperlinks[idx - 2]:
                 ws.cell(row=idx, column=2).hyperlink = hyperlinks[idx - 2]
-            ws.cell(row=idx, column=3).value = row[2]
-            ws.cell(row=idx, column=4).value = row[3]
-            ws.cell(row=idx, column=5).value = row[4]
-            ws.cell(row=idx, column=6).value = row[5]
-            ws.cell(row=idx, column=7).value = row[6]
+            ws.cell(row=idx, column=3).value = row[2]  # Previous Data
+            ws.cell(row=idx, column=4).value = row[3]  # Current Data
+            ws.cell(row=idx, column=5).value = row[4]  # Status
+            ws.cell(row=idx, column=6).value = row[5]  # Tracking Number
+            ws.cell(row=idx, column=7).value = row[6]  # Creation Date
 
         # ── Summary Metrics ─────────────────────────────────────────────────
         st.markdown("---")
@@ -201,7 +191,7 @@ if uploaded_file:
             use_container_width=True
         )
 
-        # ── Download Updated Excel ───────────────────────────────────────────
+        # ── Download Updated Excel ──────────────────────────────────────────
         st.markdown("---")
         st.subheader("📥 Step 3 — Download Updated Excel")
 
@@ -225,6 +215,6 @@ else:
     ### How to use:
     1. 📤 **Upload** your `RPS-BOT.xlsx` file above
     2. 🚀 **Click** the Run Scrapers button
-    3. ⏳ **Wait** for all sources to be checked (~1-2 mins)
+    3. ⏳ **Wait** for all sources to be checked
     4. ⬇️ **Download** the updated Excel file
     """)
